@@ -13,12 +13,13 @@ echo "=== Creating Docker Network ==="
 docker network create prompt-net 2>/dev/null || true
 
 echo "=== Stopping & Removing Existing Containers ==="
-docker stop prompt-ui prompt-be 2>/dev/null || true
-docker rm prompt-ui prompt-be 2>/dev/null || true
+docker stop prompt-ui prompt-be prompt-vector-ingestion 2>/dev/null || true
+docker rm prompt-ui prompt-be prompt-vector-ingestion 2>/dev/null || true
 
 echo "=== Building and Publishing Containers to Local Docker Daemon ==="
 dotnet publish PromptBE/PromptBE.csproj -t:PublishContainer -c Release
 dotnet publish PromptUI/PromptUI.csproj -t:PublishContainer -c Release
+dotnet publish PromptVectorIngestion/PromptVectorIngestion.csproj -t:PublishContainer -c Release
 
 echo "=== Launching Backend Service (PromptBE) ==="
 docker run -d \
@@ -27,6 +28,13 @@ docker run -d \
   -p 5125:8080 \
   -e ConnectionStrings__DefaultConnection="$CONN_STR" \
   prompt-be:latest
+
+echo "=== Launching Ingestion Service (PromptVectorIngestion) ==="
+docker run -d \
+  --name prompt-vector-ingestion \
+  --network prompt-net \
+  -p 5130:8080 \
+  prompt-vector-ingestion:latest
 
 echo "=== Launching Frontend UI (PromptUI) ==="
 docker run -d \

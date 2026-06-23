@@ -1,3 +1,6 @@
+using Dapr.Client;
+using System.Net.Http;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PromptBE.Data;
@@ -36,6 +39,7 @@ builder.Services.AddDbContext<PromptDbContext>(options =>
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddSingleton<DaprClient>(new DaprClientBuilder().Build());
 
 var app = builder.Build();
 
@@ -99,7 +103,11 @@ app.MapGet("/api/prompts", async (PromptDbContext db) =>
 })
 .WithName("GetPrompts");
 
-app.MapPost("/api/prompts", async ([FromBody] PromptDto newPrompt, PromptDbContext db) =>
+app.MapPost("/api/prompts", async (
+    [FromBody] PromptDto newPrompt, 
+    PromptDbContext db,
+    [FromServices] DaprClient daprClient,
+    ILoggerFactory loggerFactory) =>
 {
     if (string.IsNullOrWhiteSpace(newPrompt.Title) || string.IsNullOrWhiteSpace(newPrompt.PromptText))
     {
@@ -167,9 +175,116 @@ app.MapPost("/api/prompts", async ([FromBody] PromptDto newPrompt, PromptDbConte
         promptEntity.CreatedOn
     );
 
+    var logger = loggerFactory.CreateLogger("PromptBE");
+    try
+    {
+        logger.LogInformation("Publishing prompt event to Dapr topic 'prompts' for Prompt ID: {PromptId}", responseDto.Id);
+        var metadata = new Dictionary<string, string> { { "partitionKey", responseDto.Id } };
+        await daprClient.PublishEventAsync("pubsub", "prompts", responseDto, metadata);
+        logger.LogInformation("Successfully published event for Prompt ID: {PromptId}", responseDto.Id);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("Failed to publish prompt event to Dapr pubsub ({Message}). Attempting direct local HTTP fallback...", ex.Message);
+        try
+        {
+            using var httpClient = new HttpClient();
+            var isDocker = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+            var localIngestionUrl = builder.Configuration["LocalIngestionUrl"] 
+                ?? (isDocker ? "http://prompt-vector-ingestion:8080/api/ingest-prompt" : "http://localhost:5130/api/ingest-prompt");
+            
+            logger.LogInformation("Direct HTTP POST to local ingestion url: {Url}", localIngestionUrl);
+            var response = await httpClient.PostAsJsonAsync(localIngestionUrl, responseDto);
+            if (response.IsSuccessStatusCode)
+            {
+                logger.LogInformation("Successfully sent prompt directly to local ingestion service.");
+            }
+            else
+            {
+                logger.LogWarning("Local ingestion fallback failed: {Status}", response.StatusCode);
+            }
+        }
+        catch (Exception fallbackEx)
+        {
+            logger.LogError(fallbackEx, "Local ingestion direct HTTP fallback failed. Continuing gracefully.");
+        }
+    }
+
     return Results.Created($"/api/prompts/{promptEntity.Id}", responseDto);
 })
 .WithName("CreatePrompt");
+
+app.MapPost("/api/prompts/sync", async (
+    PromptDbContext db, 
+    IConfiguration configuration,
+    ILoggerFactory loggerFactory) =>
+{
+    var logger = loggerFactory.CreateLogger("PromptBE");
+    logger.LogInformation("Starting bulk sync of prompts to RAG vector database (Option B)...");
+
+    var isDocker = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+    var ingestionUrl = configuration["IngestionUrl"] 
+        ?? (isDocker ? "http://prompt-vector-ingestion:8080" : "http://localhost:5130");
+
+    using var httpClient = new HttpClient();
+    httpClient.Timeout = TimeSpan.FromMinutes(5);
+
+    // 1. Call Reset Index
+    logger.LogInformation("Calling reset-index endpoint at {Url}/api/reset-index...", ingestionUrl);
+    try
+    {
+        var resetResponse = await httpClient.PostAsync($"{ingestionUrl}/api/reset-index", null);
+        if (!resetResponse.IsSuccessStatusCode)
+        {
+            var errorBody = await resetResponse.Content.ReadAsStringAsync();
+            logger.LogError("Failed to reset search index: {Error}", errorBody);
+            return Results.Problem($"Failed to reset index in ingestion service: {resetResponse.ReasonPhrase}. Details: {errorBody}");
+        }
+        logger.LogInformation("Successfully reset and recreated the search index.");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to connect to ingestion service to reset index.");
+        return Results.Problem("Failed to connect to ingestion service: " + ex.Message);
+    }
+
+    // 2. Query all prompts from database
+    var dbPrompts = await db.Prompts
+        .Include(p => p.TagPrompts).ThenInclude(tp => tp.Tag)
+        .Include(p => p.CategoryPrompts).ThenInclude(cp => cp.Category)
+        .ToListAsync();
+
+    var payloads = dbPrompts.Select(p => new PromptDto(
+        p.Id,
+        p.Name,
+        p.Description,
+        p.PromptText,
+        p.CategoryPrompts.FirstOrDefault()?.Category?.Name ?? "General",
+        p.TagPrompts.Select(tp => tp.Tag.Name).ToArray(),
+        p.CreatedOn
+    )).ToList();
+
+    // 3. Call Bulk Ingest
+    logger.LogInformation("Posting {Count} prompts to bulk-ingest endpoint at {Url}/api/bulk-ingest...", payloads.Count, ingestionUrl);
+    try
+    {
+        var ingestResponse = await httpClient.PostAsJsonAsync($"{ingestionUrl}/api/bulk-ingest", payloads);
+        if (!ingestResponse.IsSuccessStatusCode)
+        {
+            var errorBody = await ingestResponse.Content.ReadAsStringAsync();
+            logger.LogError("Failed to bulk ingest prompts: {Error}", errorBody);
+            return Results.Problem($"Failed to bulk ingest prompts: {ingestResponse.ReasonPhrase}. Details: {errorBody}");
+        }
+        logger.LogInformation("Bulk sync completed successfully.");
+        return Results.Ok(new { Message = $"Successfully synced {payloads.Count} prompts to RAG vector database." });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to bulk ingest prompts via ingestion service.");
+        return Results.Problem("Failed to bulk ingest prompts: " + ex.Message);
+    }
+})
+.WithName("SyncPrompts");
 
 app.Run();
 

@@ -22,6 +22,8 @@ public class ExplorerStateService
 
     public string? CopiedPromptId { get; set; }
     public bool ShowCreateModal { get; set; } = false;
+    public bool IsSyncing { get; private set; } = false;
+    public string? SyncStatusMessage { get; private set; }
 
     public event Action? OnStateChanged;
 
@@ -35,6 +37,43 @@ public class ExplorerStateService
     {
         ShowCreateModal = false;
         NotifyStateChanged();
+    }
+
+    public async Task SyncPromptsForRag()
+    {
+        if (IsSyncing) return;
+        IsSyncing = true;
+        SyncStatusMessage = "Syncing prompts to RAG...";
+        NotifyStateChanged();
+
+        try
+        {
+            var response = await _http.PostAsync("api/prompts/sync", null);
+            if (response.IsSuccessStatusCode)
+            {
+                SyncStatusMessage = "Successfully synced prompts for RAG!";
+            }
+            else
+            {
+                SyncStatusMessage = $"Sync failed: {response.ReasonPhrase}";
+            }
+        }
+        catch (Exception ex)
+        {
+            SyncStatusMessage = $"Sync error: {ex.Message}";
+        }
+        finally
+        {
+            IsSyncing = false;
+            NotifyStateChanged();
+
+            // Clear the status message after 4 seconds
+            _ = Task.Delay(4000).ContinueWith(_ =>
+            {
+                SyncStatusMessage = null;
+                NotifyStateChanged();
+            });
+        }
     }
 
     public ExplorerStateService(HttpClient http)

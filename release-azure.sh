@@ -77,16 +77,18 @@ else
 fi
 
 echo "=================================================="
-echo "🔍 Checking for code changes in PromptBE or PromptUI"
+echo "🔍 Checking for code changes in PromptBE, PromptUI, or PromptVectorIngestion"
 echo "=================================================="
 CURRENT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
 CHANGES_DETECTED=true
 
 if [ -f ".last_version_tag" ] && [ -f ".last_version_commit" ]; then
   LAST_COMMIT=$(cat .last_version_commit)
-  # Check if the commit hasn't changed AND there are no uncommitted changes in the folders
-  if [ "$CURRENT_COMMIT" = "$LAST_COMMIT" ] && [ -n "$CURRENT_COMMIT" ] && [ -z "$(git status --porcelain -- PromptBE/ PromptUI/)" ]; then
-    CHANGES_DETECTED=false
+  if [ -n "$LAST_COMMIT" ] && git cat-file -e "$LAST_COMMIT" &>/dev/null; then
+    # Check if there are no differences in the folders between the last built commit and current tree
+    if git diff --quiet "$LAST_COMMIT" -- PromptBE/ PromptUI/ PromptVectorIngestion/ && [ -z "$(git status --porcelain -- PromptBE/ PromptUI/ PromptVectorIngestion/)" ]; then
+      CHANGES_DETECTED=false
+    fi
   fi
 fi
 
@@ -100,6 +102,7 @@ if [ "$CHANGES_DETECTED" = "true" ]; then
   echo "=================================================="
   dotnet publish PromptBE/PromptBE.csproj -t:PublishContainer -c Release
   dotnet publish PromptUI/PromptUI.csproj -t:PublishContainer -c Release
+  dotnet publish PromptVectorIngestion/PromptVectorIngestion.csproj -t:PublishContainer -c Release
 
   echo "=================================================="
   echo "🏷️ Tagging Images with Version & latest"
@@ -112,6 +115,10 @@ if [ "$CHANGES_DETECTED" = "true" ]; then
   docker tag prompt-ui:latest "${ACR_LOGIN_SERVER}/prompt-ui:${VERSION_TAG}"
   docker tag prompt-ui:latest "${ACR_LOGIN_SERVER}/prompt-ui:latest"
 
+  # Tag PromptVectorIngestion
+  docker tag prompt-vector-ingestion:latest "${ACR_LOGIN_SERVER}/prompt-vector-ingestion:${VERSION_TAG}"
+  docker tag prompt-vector-ingestion:latest "${ACR_LOGIN_SERVER}/prompt-vector-ingestion:latest"
+
   echo "=================================================="
   echo "📤 Pushing Container Images to ACR"
   echo "=================================================="
@@ -121,16 +128,19 @@ if [ "$CHANGES_DETECTED" = "true" ]; then
   docker push "${ACR_LOGIN_SERVER}/prompt-ui:${VERSION_TAG}"
   docker push "${ACR_LOGIN_SERVER}/prompt-ui:latest"
 
+  docker push "${ACR_LOGIN_SERVER}/prompt-vector-ingestion:${VERSION_TAG}"
+  docker push "${ACR_LOGIN_SERVER}/prompt-vector-ingestion:latest"
+
   # Cache the tag and built commit locally
   echo "$VERSION_TAG" > .last_version_tag
-  if [ -z "$(git status --porcelain -- PromptBE/ PromptUI/)" ] && [ -n "$CURRENT_COMMIT" ]; then
+  if [ -z "$(git status --porcelain -- PromptBE/ PromptUI/ PromptVectorIngestion/)" ] && [ -n "$CURRENT_COMMIT" ]; then
     echo "$CURRENT_COMMIT" > .last_version_commit
   else
     echo "dirty" > .last_version_commit
   fi
 else
   VERSION_TAG=$(cat .last_version_tag)
-  echo "No changes detected in PromptBE/ or PromptUI/ source code."
+  echo "No changes detected in PromptBE/, PromptUI/, or PromptVectorIngestion/ source code."
   echo "Skipping container rebuild & push. Reusing tag: $VERSION_TAG"
 fi
 

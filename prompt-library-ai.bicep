@@ -8,6 +8,7 @@ param logAnalyticsWorkspaceName string = 'prompt-library-la'
 param containerAppsEnvName string = 'prompt-library-env'
 param promptBeName string = 'prompt-be'
 param promptUiName string = 'prompt-ui'
+param promptVectorIngestionName string = 'prompt-vector-ingestion'
 
 // SQL Database Server Configuration - Renamed to prompt-sql-srv to resolve metadata collisions
 param sqlServerName string = 'prompt-sql-srv-${uniqueString(resourceGroup().id)}'
@@ -23,6 +24,9 @@ var beImage = empty(versionTag)
 var uiImage = empty(versionTag)
   ? 'mcr.microsoft.com/dotnet/samples:aspnetapp'
   : '${acrName}.azurecr.io/prompt-ui:${versionTag}'
+var ingestionImage = empty(versionTag)
+  ? 'mcr.microsoft.com/dotnet/samples:aspnetapp'
+  : '${acrName}.azurecr.io/prompt-vector-ingestion:${versionTag}'
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: acrName
@@ -91,6 +95,103 @@ resource sqlDatabase 'Microsoft.Sql/servers/databases@2021-11-01' = {
   }
 }
 
+// Azure AI Search Service
+resource searchService 'Microsoft.Search/searchServices@2023-11-01' = {
+  name: 'prompt-search-${uniqueString(resourceGroup().id)}'
+  location: location
+  sku: {
+    name: 'free'
+  }
+  properties: {
+    replicaCount: 1
+    partitionCount: 1
+    hostingMode: 'default'
+  }
+}
+
+// Azure Event Hubs Namespace
+resource eventHubNamespace 'Microsoft.EventHub/namespaces@2021-11-01' = {
+  name: 'prompt-evh-${uniqueString(resourceGroup().id)}'
+  location: location
+  sku: {
+    name: 'Standard'
+    tier: 'Standard'
+    capacity: 1
+  }
+}
+
+// Event Hub / Topic "prompts"
+resource eventHub 'Microsoft.EventHub/namespaces/eventhubs@2021-11-01' = {
+  parent: eventHubNamespace
+  name: 'prompts'
+  properties: {
+    messageRetentionInDays: 1
+    partitionCount: 2
+  }
+}
+
+resource consumerGroup 'Microsoft.EventHub/namespaces/eventhubs/consumergroups@2021-11-01' = {
+  parent: eventHub
+  name: 'prompt-vector-ingestion'
+}
+
+resource eventHubAuthRule 'Microsoft.EventHub/namespaces/authorizationRules@2021-11-01' existing = {
+  parent: eventHubNamespace
+  name: 'RootManageSharedAccessKey'
+}
+
+// Storage Account for Dapr Checkpoints
+resource storageAccount 'Microsoft.Storage/storageAccounts@2021-09-01' = {
+  name: 'promptst${uniqueString(resourceGroup().id)}'
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+}
+
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2021-09-01' = {
+  parent: storageAccount
+  name: 'default'
+}
+
+resource storageContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2021-09-01' = {
+  parent: blobService
+  name: 'daprcheckpoints'
+}
+
+// Dapr Component resource in the Container App environment
+resource daprPubSub 'Microsoft.App/managedEnvironments/daprComponents@2023-05-01' = {
+  parent: containerAppsEnv
+  name: 'pubsub'
+  properties: {
+    componentType: 'pubsub.azure.eventhubs'
+    version: 'v1'
+    metadata: [
+      {
+        name: 'connectionString'
+        value: eventHubAuthRule.listKeys().primaryConnectionString
+      }
+      {
+        name: 'storageAccountName'
+        value: storageAccount.name
+      }
+      {
+        name: 'storageAccountKey'
+        value: storageAccount.listKeys().keys[0].value
+      }
+      {
+        name: 'storageContainerName'
+        value: 'daprcheckpoints'
+      }
+    ]
+    scopes: [
+      'prompt-be'
+      'prompt-vector-ingestion'
+    ]
+  }
+}
+
 resource promptBeApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: promptBeName
   location: location
@@ -120,6 +221,11 @@ resource promptBeApp 'Microsoft.App/containerApps@2023-05-01' = {
           value: 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDatabaseName};User ID=${sqlAdminUsername};Password=${sqlAdminPassword};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
         }
       ]
+      dapr: {
+        enabled: true
+        appId: 'prompt-be'
+        appPort: 8080
+      }
     }
     template: {
       containers: [
@@ -134,6 +240,10 @@ resource promptBeApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'AllowedOrigins'
               value: 'https://${promptUiName}.${containerAppsEnv.properties.defaultDomain}'
+            }
+            {
+              name: 'IngestionUrl'
+              value: 'http://${promptVectorIngestionName}'
             }
           ]
           resources: {
@@ -189,6 +299,74 @@ resource promptUiApp 'Microsoft.App/containerApps@2023-05-01' = {
           }
         }
       ]
+    }
+  }
+}
+
+resource promptVectorIngestionApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: promptVectorIngestionName
+  location: location
+  properties: {
+    managedEnvironmentId: containerAppsEnv.id
+    configuration: {
+      ingress: {
+        external: false
+        targetPort: 8080
+        allowInsecure: false
+        transport: 'auto'
+      }
+      registries: [
+        {
+          server: acr.properties.loginServer
+          username: acr.name
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+      secrets: [
+        {
+          name: 'acr-password'
+          value: acr.listCredentials().passwords[0].value
+        }
+        {
+          name: 'search-api-key'
+          value: searchService.listAdminKeys().primaryKey
+        }
+      ]
+      dapr: {
+        enabled: true
+        appId: 'prompt-vector-ingestion'
+        appPort: 8080
+      }
+    }
+    template: {
+      containers: [
+        {
+          name: promptVectorIngestionName
+          image: ingestionImage
+          env: [
+            {
+              name: 'SearchService__Endpoint'
+              value: 'https://${searchService.name}.search.windows.net'
+            }
+            {
+              name: 'SearchService__ApiKey'
+              secretRef: 'search-api-key'
+            }
+            {
+              name: 'SearchService__IndexName'
+              value: 'prompts-index'
+            }
+          ]
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 1
+      }
     }
   }
 }

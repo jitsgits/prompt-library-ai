@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @inject ExplorerStateService StateService
 
 <div class="page">
@@ -8,9 +9,29 @@
 
     <main>
         <div class="top-row px-4">
-            <button class="btn btn-premium-primary btn-sm" @onclick="StateService.OpenCreateModal">
-                <i class="bi bi-plus-lg"></i> Add New Prompt
-            </button>
+            <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-premium-primary btn-sm" @onclick="StateService.OpenCreateModal">
+                    <i class="bi bi-plus-lg"></i> Add New Prompt
+                </button>
+                
+                <button class="btn btn-premium-secondary btn-sm" @onclick="StateService.SyncPromptsForRag" disabled="@StateService.IsSyncing">
+                    @if (StateService.IsSyncing)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                        <span>Syncing...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-arrow-repeat me-1"></i>
+                        <span>Sync Prompts for RAG</span>
+                    }
+                </button>
+
+                @if (!string.IsNullOrEmpty(StateService.SyncStatusMessage))
+                {
+                    <span class="ms-2 small" style="color: rgba(255, 255, 255, 0.7);">@StateService.SyncStatusMessage</span>
+                }
+            </div>
         </div>
 
         <article class="content px-4">
@@ -24,3 +45,15 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        StateService.OnStateChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        StateService.OnStateChanged -= StateHasChanged;
+    }
+}
