@@ -76,13 +76,11 @@
             <!-- Search bar and details summary header -->
             <div class="row mb-4 align-items-center">
                 <div class="col-lg-6 mb-3 mb-lg-0">
-                    <div class="input-group">
-                        <span class="input-group-text bg-transparent border-end-0 text-muted" style="border-color: var(--border-color); border-radius: 12px 0 0 12px;">
-                            <i class="bi bi-search"></i>
-                        </span>
+                    <div class="position-relative">
+                        <i class="bi bi-search position-absolute top-50 start-0 translate-middle-y ms-3 text-muted"></i>
                         <input type="text" 
-                               class="form-control premium-search border-start-0" 
-                               style="border-radius: 0 12px 12px 0 !important;"
+                               class="form-control premium-search" 
+                               style="padding-left: 2.75rem !important; border-radius: 12px !important;"
                                placeholder="Search by title, tags or content..." 
                                @bind="StateService.SearchQuery" 
                                @bind:event="oninput"
