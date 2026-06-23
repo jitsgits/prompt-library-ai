@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Fetch connection string from Azure Container App secrets dynamically
+echo "=== Fetching database connection string from Azure ==="
+CONN_STR=$(az containerapp secret list --name "prompt-be" --resource-group "prompt-library-ai" --show-values --query "[?name=='db-connection-string'].value" --output tsv 2>/dev/null || true)
+
+if [ -z "$CONN_STR" ]; then
+  echo "⚠️ Warning: Could not retrieve database connection string from Azure. Ensure you are logged in (az login)."
+fi
+
 echo "=== Creating Docker Network ==="
 docker network create prompt-net 2>/dev/null || true
 
@@ -17,6 +25,7 @@ docker run -d \
   --name prompt-be \
   --network prompt-net \
   -p 5125:8080 \
+  -e ConnectionStrings__DefaultConnection="$CONN_STR" \
   prompt-be:latest
 
 echo "=== Launching Frontend UI (PromptUI) ==="

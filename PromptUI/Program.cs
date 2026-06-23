@@ -8,6 +8,7 @@ builder.Services.AddRazorComponents()
 
 var backendUrl = builder.Configuration["BackendUrl"] ?? "http://localhost:5125";
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(backendUrl) });
+builder.Services.AddScoped<PromptUI.Services.ExplorerStateService>();
 
 var app = builder.Build();
 

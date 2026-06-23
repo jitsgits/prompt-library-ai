@@ -6,13 +6,101 @@
 
 <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
 
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Dashboard
-            </NavLink>
+<div class="nav-scrollable">
+    <nav class="nav flex-column pt-3">
+        <div class="px-3">
+            <div class="text-uppercase small text-muted mb-2 px-1 fw-bold" style="font-size: 0.75rem; letter-spacing: 0.05em;">
+                <i class="bi bi-folder2-open text-purple me-1"></i> Explorer
+            </div>
+            
+            @if (StateService.IsLoading)
+            {
+                <div class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm text-secondary" role="status" style="border-color: var(--accent-purple) transparent var(--accent-purple) transparent;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            }
+            else if (StateService.ErrorMessage != null)
+            {
+                <div class="text-danger small px-1">Error loading explorer</div>
+            }
+            else
+            {
+                <!-- Hierarchy Tree -->
+                <ul class="tree-list">
+                    @foreach (var cat in StateService.Categories)
+                    {
+                        var catPrompts = StateService.GetPromptsForCategory(cat).ToList();
+                        var isExpanded = StateService.ExpandedCategories.Contains(cat);
+                        <li class="tree-node">
+                            <div class="tree-node-header @(isExpanded ? "expanded" : "") @(StateService.SelectedCategory == cat && StateService.SelectedPrompt == null ? "bg-dark text-white" : "")" 
+                                 @onclick="() => StateService.ToggleCategoryExpand(cat)">
+                                <i class="node-icon bi @(isExpanded ? "bi-folder2-open" : "bi-folder")" style="color: var(--accent-purple);"></i>
+                                <span class="text-truncate" style="max-width: 140px; font-size: 0.85rem;">@cat</span>
+                                <span class="badge rounded-pill bg-dark text-secondary ms-2 small">@catPrompts.Count</span>
+                                <i class="node-toggle bi bi-chevron-right ms-auto"></i>
+                            </div>
+                            <ul class="tree-children @(isExpanded ? "show" : "")" style="padding-left: 1rem;">
+                                @foreach (var prompt in catPrompts)
+                                {
+                                    <li class="tree-leaf @(StateService.SelectedPrompt?.Id == prompt.Id ? "active" : "")" 
+                                        @onclick="() => StateService.SelectPrompt(prompt)"
+                                        @onclick:stopPropagation="true">
+                                        <i class="leaf-icon bi bi-file-earmark-text" style="font-size: 0.85rem;"></i>
+                                        <span class="text-truncate" style="max-width: 130px; font-size: 0.82rem;">@prompt.Title</span>
+                                    </li>
+                                }
+                                @if (!catPrompts.Any())
+                                {
+                                    <li class="ps-3 py-1 small text-muted" style="font-size: 0.75rem;">No matching prompts</li>
+                                }
+                            </ul>
+                        </li>
+                    }
+                </ul>
+
+                <!-- Tags Filtering Cloud -->
+                <div class="tag-explorer-section mt-4 px-1">
+                    <div class="text-uppercase small text-white mb-2 fw-bold" style="font-size: 0.75rem; letter-spacing: 0.05em;">
+                        <i class="bi bi-tags text-purple me-1"></i> Filter by Tags
+                    </div>
+                    <div class="tag-cloud">
+                        @foreach (var tag in StateService.AllTags)
+                        {
+                            <span class="tag-cloud-item @(StateService.SelectedTags.Contains(tag) ? "active" : "")" 
+                                  @onclick="() => StateService.ToggleTag(tag)"
+                                  style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">
+                                #@tag
+                            </span>
+                        }
+                        @if (!StateService.AllTags.Any())
+                        {
+                            <span class="small text-muted" style="font-size: 0.75rem;">No tags available</span>
+                        }
+                    </div>
+                </div>
+            }
         </div>
     </nav>
 </div>
+
+@code {
+    [Inject] public ExplorerStateService StateService { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        StateService.OnStateChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        StateService.OnStateChanged -= StateHasChanged;
+    }
+
+    private void ResetExplorer()
+    {
+        StateService.ClearAllFilters();
+    }
+}
 

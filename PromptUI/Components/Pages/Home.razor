@@ -1,26 +1,13 @@
 @page "/"
-@inject HttpClient Http
+@rendermode InteractiveServer
 @inject IJSRuntime JS
+@implements IDisposable
 
 <PageTitle>Prompt Library Dashboard</PageTitle>
 
 <div class="container-fluid py-4">
-    <!-- Hero Banner -->
-    <div class="hero-banner">
-        <div class="row align-items-center">
-            <div class="col-md-8">
-                <h1>Prompt Library AI</h1>
-                <p class="text-secondary mb-0">Discover, manage, and copy optimized AI prompts for coding, analysis, marketing, and creative writing.</p>
-            </div>
-            <div class="col-md-4 text-md-end mt-3 mt-md-0">
-                <button class="btn btn-premium-primary" @onclick="OpenCreateModal">
-                    <i class="bi bi-plus-lg"></i> Add New Prompt
-                </button>
-            </div>
-        </div>
-    </div>
 
-    @if (isLoading)
+    @if (StateService.IsLoading)
     {
         <div class="d-flex flex-column align-items-center justify-content-center my-5 py-5">
             <div class="spinner-border text-primary" role="status" style="border-color: var(--accent-purple) transparent var(--accent-purple) transparent;">
@@ -29,214 +16,183 @@
             <p class="text-secondary mt-3">Connecting to Prompt Service...</p>
         </div>
     }
-    else if (errorMessage != null)
+    else if (StateService.ErrorMessage != null)
     {
         <div class="glass-card text-center my-5 p-5 border-danger">
             <h4 class="text-danger">Unable to load prompts</h4>
-            <p class="text-secondary my-3">@errorMessage</p>
+            <p class="text-secondary my-3">@StateService.ErrorMessage</p>
             <button class="btn btn-premium-secondary" @onclick="LoadPrompts">Retry Connection</button>
         </div>
     }
     else
     {
-        <!-- Stats Widgets -->
-        <div class="stats-grid">
-            <div class="glass-card stat-card">
-                <div class="stat-val">@prompts.Count</div>
-                <div class="stat-lbl">Total Prompts</div>
-            </div>
-            <div class="glass-card stat-card">
-                <div class="stat-val">@prompts.Count(p => p.Category == "Coding")</div>
-                <div class="stat-lbl">Coding</div>
-            </div>
-            <div class="glass-card stat-card">
-                <div class="stat-val">@prompts.Count(p => p.Category == "Analysis")</div>
-                <div class="stat-lbl">Analysis</div>
-            </div>
-            <div class="glass-card stat-card">
-                <div class="stat-val">@prompts.Count(p => p.Category == "Creative")</div>
-                <div class="stat-lbl">Creative & Marketing</div>
-            </div>
-        </div>
+        @if (StateService.SelectedPrompt != null)
+        {
+            <!-- Selected Prompt Detail View -->
+            <div class="prompt-detail-card">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <button class="btn btn-premium-secondary btn-sm" @onclick="DeselectPrompt">
+                        <i class="bi bi-arrow-left"></i> Back to Grid
+                    </button>
+                    <span class="category-badge @GetCategoryClass(StateService.SelectedPrompt.Category)">@StateService.SelectedPrompt.Category</span>
+                </div>
 
-        <!-- Search and Filter Section -->
-        <div class="row mb-4 align-items-center">
-            <div class="col-lg-4 mb-3 mb-lg-0">
-                <input type="text" 
-                       class="form-control premium-search" 
-                       placeholder="Search by title, tags or content..." 
-                       @bind="searchQuery" 
-                       @bind:event="oninput" />
-            </div>
-            <div class="col-lg-8">
-                <div class="d-flex flex-wrap">
-                    <div class="filter-chip @(selectedCategory == "All" ? "active" : "")" @onclick='() => SetCategory("All")'>All</div>
-                    <div class="filter-chip @(selectedCategory == "Coding" ? "active" : "")" @onclick='() => SetCategory("Coding")'>Coding</div>
-                    <div class="filter-chip @(selectedCategory == "Analysis" ? "active" : "")" @onclick='() => SetCategory("Analysis")'>Analysis</div>
-                    <div class="filter-chip @(selectedCategory == "Creative" ? "active" : "")" @onclick='() => SetCategory("Creative")'>Creative</div>
-                    <div class="filter-chip @(selectedCategory == "Marketing" ? "active" : "")" @onclick='() => SetCategory("Marketing")'>Marketing</div>
+                <h2 class="h3 mb-2">@StateService.SelectedPrompt.Title</h2>
+                <div class="text-muted small mb-3">
+                    <i class="bi bi-calendar-event"></i> Created: @StateService.SelectedPrompt.CreatedOn.ToLocalTime().ToString("MMMM dd, yyyy")
+                </div>
+
+                <p class="text-secondary mb-4 fs-5">@StateService.SelectedPrompt.Description</p>
+
+                <div class="mb-4">
+                    <h4 class="h6 text-secondary text-uppercase mb-2">Prompt Template</h4>
+                    <div class="position-relative">
+                        <pre class="prompt-detail-pre">@StateService.SelectedPrompt.PromptText</pre>
+                        <button class="copy-btn position-absolute top-0 end-0 m-3 @(copiedPromptId == StateService.SelectedPrompt.Id ? "copied" : "")" 
+                                @onclick="() => CopyToClipboard(StateService.SelectedPrompt)">
+                            @if (copiedPromptId == StateService.SelectedPrompt.Id)
+                            {
+                                <i class="bi bi-check-lg"></i> <span>Copied!</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-clipboard"></i> <span>Copy Prompt</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mb-2">
+                    <h4 class="h6 text-secondary text-uppercase mb-2">Tags</h4>
+                    @foreach (var tag in StateService.SelectedPrompt.Tags)
+                    {
+                        <span class="tag-pill cursor-pointer" style="cursor: pointer;" @onclick="() => ToggleTag(tag)">#@tag</span>
+                    }
                 </div>
             </div>
-        </div>
+        }
+        else
+        {
+            <!-- Search bar and details summary header -->
+            <div class="row mb-4 align-items-center">
+                <div class="col-lg-6 mb-3 mb-lg-0">
+                    <div class="input-group">
+                        <span class="input-group-text bg-transparent border-end-0 text-muted" style="border-color: var(--border-color); border-radius: 12px 0 0 12px;">
+                            <i class="bi bi-search"></i>
+                        </span>
+                        <input type="text" 
+                               class="form-control premium-search border-start-0" 
+                               style="border-radius: 0 12px 12px 0 !important;"
+                               placeholder="Search by title, tags or content..." 
+                               @bind="StateService.SearchQuery" 
+                               @bind:event="oninput"
+                               @bind:after="StateService.NotifyStateChanged" />
+                    </div>
+                </div>
+                <div class="col-lg-6 text-lg-end">
+                    <span class="text-secondary small">
+                        Showing <b>@StateService.FilteredPrompts.Count()</b> of <b>@StateService.Prompts.Count</b> prompts
+                    </span>
+                </div>
+            </div>
 
-        <!-- Prompt Cards Grid -->
-        <div class="row g-4">
-            @foreach (var prompt in FilteredPrompts)
-            {
-                <div class="col-md-6 col-xl-4">
-                    <div class="glass-card h-100 d-flex flex-column justify-content-between">
-                        <div>
-                            <div class="d-flex justify-content-between align-items-start mb-3">
-                                <span class="category-badge @GetCategoryClass(prompt.Category)">@prompt.Category</span>
-                                <small class="text-muted">@prompt.CreatedOn.ToLocalTime().ToString("MMM dd, yyyy")</small>
+            <!-- Prompt Cards Grid (Full Width layout) -->
+            <div class="row g-4">
+                @foreach (var prompt in StateService.FilteredPrompts)
+                {
+                    <div class="col-md-6 col-lg-4">
+                        <div class="glass-card h-100 d-flex flex-column justify-content-between">
+                            <div>
+                                <div class="d-flex justify-content-between align-items-start mb-3">
+                                    <span class="category-badge @GetCategoryClass(prompt.Category)">@prompt.Category</span>
+                                    <small class="text-muted">@prompt.CreatedOn.ToLocalTime().ToString("MMM dd, yyyy")</small>
+                                </div>
+                                <h3 class="h5 mb-2" style="cursor: pointer; transition: color 0.2s;" @onclick="() => SelectPrompt(prompt)">
+                                    @prompt.Title
+                                </h3>
+                                <p class="text-secondary small mb-3">@prompt.Description</p>
+                                
+                                <div class="prompt-text-display mb-3" style="cursor: pointer;" @onclick="() => SelectPrompt(prompt)">
+                                    @prompt.PromptText
+                                </div>
                             </div>
-                            <h3 class="h5 mb-2">@prompt.Title</h3>
-                            <p class="text-secondary small mb-3">@prompt.Description</p>
-                            
-                            <div class="prompt-text-display mb-3">
-                                @prompt.PromptText
-                            </div>
-                        </div>
 
-                        <div>
-                            <div class="mb-3">
-                                @foreach (var tag in prompt.Tags)
-                                {
-                                    <span class="tag-pill">#@tag</span>
-                                }
-                            </div>
-                            <div class="d-flex justify-content-end">
-                                <button class="copy-btn @(copiedPromptId == prompt.Id ? "copied" : "")" @onclick="() => CopyToClipboard(prompt)">
-                                    @if (copiedPromptId == prompt.Id)
+                            <div>
+                                <div class="mb-3">
+                                    @foreach (var tag in prompt.Tags)
                                     {
-                                        <i class="bi bi-check-lg"></i> <span>Copied!</span>
+                                        <span class="tag-pill cursor-pointer" style="cursor: pointer;" @onclick="() => ToggleTag(tag)">#@tag</span>
                                     }
-                                    else
-                                    {
-                                        <i class="bi bi-clipboard"></i> <span>Copy Prompt</span>
-                                    }
-                                </button>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <button class="btn btn-link btn-sm p-0 text-decoration-none text-purple small" @onclick="() => SelectPrompt(prompt)">
+                                        Explore <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                    <button class="copy-btn @(copiedPromptId == prompt.Id ? "copied" : "")" @onclick="() => CopyToClipboard(prompt)" @onclick:stopPropagation="true">
+                                        @if (copiedPromptId == prompt.Id)
+                                        {
+                                            <i class="bi bi-check-lg"></i> <span>Copied!</span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-clipboard"></i> <span>Copy</span>
+                                        }
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            }
+                }
 
-            @if (!FilteredPrompts.Any())
-            {
-                <div class="col-12 text-center py-5">
-                    <p class="text-secondary fs-5">No prompts matched your search filters.</p>
-                </div>
-            }
-        </div>
+                @if (!StateService.FilteredPrompts.Any())
+                {
+                    <div class="col-12 text-center py-5">
+                        <p class="text-secondary fs-5">No prompts matched your search filters.</p>
+                    </div>
+                }
+            </div>
+        }
     }
 </div>
 
 <!-- Create Prompt Modal -->
-<div class="modal-overlay @(showCreateModal ? "show" : "")">
-    <div class="glass-card modal-content-glass m-3">
-        <h3 class="mb-4 text-center">Add New Prompt</h3>
-        <EditForm Model="@newPromptModel" OnValidSubmit="HandleSubmit">
-            <DataAnnotationsValidator />
-            <ValidationSummary class="text-danger small mb-3" />
-
-            <div class="mb-3">
-                <label class="form-label text-secondary small">Title</label>
-                <InputText class="form-control premium-input" @bind-Value="newPromptModel.Title" placeholder="e.g. Git Commit Message Assistant" />
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label text-secondary small">Description</label>
-                <InputText class="form-control premium-input" @bind-Value="newPromptModel.Description" placeholder="e.g. Helps write standardized, crisp commit logs." />
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label text-secondary small">Prompt Instructions</label>
-                <InputTextArea class="form-control premium-textarea" @bind-Value="newPromptModel.PromptText" placeholder="Write the system prompt instructions here..." />
-            </div>
-
-            <div class="row mb-3">
-                <div class="col-sm-6 mb-3 mb-sm-0">
-                    <label class="form-label text-secondary small">Category</label>
-                    <InputSelect class="form-select premium-select" @bind-Value="newPromptModel.Category">
-                        <option value="Coding">Coding</option>
-                        <option value="Analysis">Analysis</option>
-                        <option value="Creative">Creative</option>
-                        <option value="Marketing">Marketing</option>
-                    </InputSelect>
-                </div>
-                <div class="col-sm-6">
-                    <label class="form-label text-secondary small">Tags (comma separated)</label>
-                    <InputText class="form-control premium-input" @bind-Value="tagsInput" placeholder="git, devops, productivity" />
-                </div>
-            </div>
-
-            <div class="d-flex justify-content-end gap-2 mt-4">
-                <button type="button" class="btn btn-premium-secondary" @onclick="CloseCreateModal">Cancel</button>
-                <button type="submit" class="btn btn-premium-primary">Save Prompt</button>
-            </div>
-        </EditForm>
-    </div>
+<div class="modal-overlay @(StateService.ShowCreateModal ? "show" : "")">
+    @if (StateService.ShowCreateModal)
+    {
+        <AddPromptForm OnPromptSaved="OnPromptSaved" OnCancel="StateService.CloseCreateModal" />
+    }
 </div>
 
 @code {
-    private List<Prompt> prompts = new();
-    private bool isLoading = true;
-    private string? errorMessage;
-    
-    private string searchQuery = "";
-    private string selectedCategory = "All";
+    [Inject] public ExplorerStateService StateService { get; set; } = default!;
+
     private string? copiedPromptId;
-    
-    private bool showCreateModal = false;
-    private PromptModel newPromptModel = new();
-    private string tagsInput = "";
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadPrompts();
+        StateService.OnStateChanged += StateHasChanged;
+        
+        if (!StateService.Prompts.Any())
+        {
+            await LoadPrompts();
+        }
+    }
+
+    public void Dispose()
+    {
+        StateService.OnStateChanged -= StateHasChanged;
     }
 
     private async Task LoadPrompts()
     {
-        isLoading = true;
-        errorMessage = null;
-        try
-        {
-            var response = await Http.GetFromJsonAsync<List<Prompt>>("api/prompts");
-            if (response != null)
-            {
-                prompts = response;
-            }
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Error connecting to backend: {ex.Message}";
-        }
-        finally
-        {
-            isLoading = false;
-        }
+        await StateService.LoadPrompts();
     }
 
-    private IEnumerable<Prompt> FilteredPrompts => prompts.Where(p =>
-    {
-        var categoryMatches = selectedCategory == "All" || p.Category == selectedCategory;
-        if (!categoryMatches) return false;
-
-        if (string.IsNullOrWhiteSpace(searchQuery)) return true;
-
-        var term = searchQuery.ToLowerInvariant();
-        return p.Title.ToLowerInvariant().Contains(term) ||
-               p.Description.ToLowerInvariant().Contains(term) ||
-               p.PromptText.ToLowerInvariant().Contains(term) ||
-               p.Tags.Any(t => t.ToLowerInvariant().Contains(term));
-    });
-
-    private void SetCategory(string category)
-    {
-        selectedCategory = category;
-    }
+    private void DeselectPrompt() => StateService.DeselectPrompt();
+    
+    private void SelectPrompt(Prompt prompt) => StateService.SelectPrompt(prompt);
+    
+    private void ToggleTag(string tag) => StateService.ToggleTag(tag);
 
     private string GetCategoryClass(string category) => category.ToLowerInvariant() switch
     {
@@ -261,85 +217,11 @@
         });
     }
 
-    private void OpenCreateModal()
+    private void OnPromptSaved(Prompt created)
     {
-        newPromptModel = new PromptModel { Category = "Coding" };
-        tagsInput = "";
-        showCreateModal = true;
-    }
-
-    private void CloseCreateModal()
-    {
-        showCreateModal = false;
-    }
-
-    private async Task HandleSubmit()
-    {
-        var parsedTags = string.IsNullOrWhiteSpace(tagsInput)
-            ? Array.Empty<string>()
-            : tagsInput.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                       .Select(t => t.Trim().ToLowerInvariant())
-                       .ToArray();
-
-        var payload = new Prompt(
-            "",
-            newPromptModel.Title ?? "",
-            newPromptModel.Description ?? "",
-            newPromptModel.PromptText ?? "",
-            newPromptModel.Category ?? "Coding",
-            parsedTags,
-            DateTime.UtcNow
-        );
-
-        try
-        {
-            var response = await Http.PostAsJsonAsync("api/prompts", payload);
-            if (response.IsSuccessStatusCode)
-            {
-                var created = await response.Content.ReadFromJsonAsync<Prompt>();
-                if (created != null)
-                {
-                    prompts.Add(created);
-                }
-                showCreateModal = false;
-            }
-            else
-            {
-                var details = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Failed to create prompt: {details}";
-            }
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Error posting new prompt: {ex.Message}";
-        }
-    }
-
-    public record Prompt(
-        string Id,
-        string Title,
-        string Description,
-        string PromptText,
-        string Category,
-        string[] Tags,
-        DateTime CreatedOn
-    );
-
-    public class PromptModel
-    {
-        [System.ComponentModel.DataAnnotations.Required]
-        [System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 3)]
-        public string? Title { get; set; }
-
-        [System.ComponentModel.DataAnnotations.Required]
-        [System.ComponentModel.DataAnnotations.StringLength(200, MinimumLength = 5)]
-        public string? Description { get; set; }
-
-        [System.ComponentModel.DataAnnotations.Required]
-        [System.ComponentModel.DataAnnotations.StringLength(2000, MinimumLength = 10)]
-        public string? PromptText { get; set; }
-
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Category { get; set; }
+        StateService.Prompts.Add(created);
+        StateService.ExpandedCategories.Add(created.Category);
+        StateService.SelectedPrompt = created;
+        StateService.CloseCreateModal();
     }
 }
