@@ -431,4 +431,5 @@ FodyWeavers.xsd
 # Local deployment tag cache
 .last_version_tag
 .last_version_commit
+.github_models_pat
 

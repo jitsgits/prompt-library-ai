@@ -9,6 +9,8 @@ param containerAppsEnvName string = 'prompt-library-env'
 param promptBeName string = 'prompt-be'
 param promptUiName string = 'prompt-ui'
 param promptVectorIngestionName string = 'prompt-vector-ingestion'
+param promptChatbotName string = 'prompt-chatbot'
+
 
 // SQL Database Server Configuration - Renamed to prompt-sql-srv to resolve metadata collisions
 param sqlServerName string = 'prompt-sql-srv-${uniqueString(resourceGroup().id)}'
@@ -16,6 +18,8 @@ param sqlDatabaseName string = 'prompt-library'
 param sqlAdminUsername string = 'sqladmin'
 @secure()
 param sqlAdminPassword string
+@secure()
+param githubModelsPat string = ''
 param sqlLocation string = 'centralus'
 
 var beImage = empty(versionTag)
@@ -27,6 +31,9 @@ var uiImage = empty(versionTag)
 var ingestionImage = empty(versionTag)
   ? 'mcr.microsoft.com/dotnet/samples:aspnetapp'
   : '${acrName}.azurecr.io/prompt-vector-ingestion:${versionTag}'
+var chatbotImage = empty(versionTag)
+  ? 'mcr.microsoft.com/dotnet/samples:aspnetapp'
+  : '${acrName}.azurecr.io/prompt-chatbot:${versionTag}'
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: acrName
@@ -108,6 +115,7 @@ resource searchService 'Microsoft.Search/searchServices@2023-11-01' = {
     hostingMode: 'default'
   }
 }
+
 
 // Azure Event Hubs Namespace
 resource eventHubNamespace 'Microsoft.EventHub/namespaces@2021-11-01' = {
@@ -292,6 +300,10 @@ resource promptUiApp 'Microsoft.App/containerApps@2023-05-01' = {
               name: 'BackendUrl'
               value: 'https://${promptBeApp.properties.configuration.ingress.fqdn}'
             }
+            {
+              name: 'ChatbotUrl'
+              value: 'http://${promptChatbotName}'
+            }
           ]
           resources: {
             cpu: json('0.25')
@@ -355,6 +367,85 @@ resource promptVectorIngestionApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'SearchService__IndexName'
               value: 'prompts-index'
+            }
+          ]
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 1
+      }
+    }
+  }
+}
+
+resource promptChatbotApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: promptChatbotName
+  location: location
+  properties: {
+    managedEnvironmentId: containerAppsEnv.id
+    configuration: {
+      ingress: {
+        external: false
+        targetPort: 8080
+        allowInsecure: false
+        transport: 'auto'
+      }
+      registries: [
+        {
+          server: acr.properties.loginServer
+          username: acr.name
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+      secrets: [
+        {
+          name: 'acr-password'
+          value: acr.listCredentials().passwords[0].value
+        }
+        {
+          name: 'search-api-key'
+          value: searchService.listAdminKeys().primaryKey
+        }
+        {
+          name: 'github-models-pat'
+          value: githubModelsPat
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: promptChatbotName
+          image: chatbotImage
+          env: [
+            {
+              name: 'SearchService__Endpoint'
+              value: 'https://${searchService.name}.search.windows.net'
+            }
+            {
+              name: 'SearchService__ApiKey'
+              secretRef: 'search-api-key'
+            }
+            {
+              name: 'SearchService__IndexName'
+              value: 'prompts-index'
+            }
+            {
+              name: 'AzureOpenAI__Endpoint'
+              value: 'https://models.inference.ai.azure.com'
+            }
+            {
+              name: 'AzureOpenAI__ApiKey'
+              secretRef: 'github-models-pat'
+            }
+            {
+              name: 'AzureOpenAI__DeploymentName'
+              value: 'gpt-4o-mini'
             }
           ]
           resources: {

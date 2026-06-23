@@ -41,6 +41,17 @@ if [ -z "$SQL_PASSWORD" ]; then
 fi
 
 echo "=================================================="
+echo "🔐 Resolving GitHub Models PAT"
+echo "=================================================="
+GITHUB_PAT=""
+if [ -f ".github_models_pat" ]; then
+  GITHUB_PAT=$(cat .github_models_pat | tr -d '\r\n ')
+  echo "GitHub Models PAT found and loaded."
+else
+  echo "Warning: .github_models_pat file not found!"
+fi
+
+echo "=================================================="
 echo "🚀 Checking for Azure Container Registry (ACR)"
 echo "=================================================="
 # Check if ACR exists
@@ -51,7 +62,7 @@ if ! az acr show --name "$ACR_NAME" --resource-group "$RG_NAME" &>/dev/null; the
   az deployment group create \
     --resource-group "$RG_NAME" \
     --template-file "$BICEP_FILE" \
-    --parameters acrName="$ACR_NAME" versionTag="" sqlAdminPassword="$SQL_PASSWORD"
+    --parameters acrName="$ACR_NAME" versionTag="" sqlAdminPassword="$SQL_PASSWORD" githubModelsPat="$GITHUB_PAT"
 fi
 
 # Retrieve the login server
@@ -77,7 +88,7 @@ else
 fi
 
 echo "=================================================="
-echo "🔍 Checking for code changes in PromptBE, PromptUI, or PromptVectorIngestion"
+echo "🔍 Checking for code changes in PromptBE, PromptUI, PromptVectorIngestion, or PromptChatbot"
 echo "=================================================="
 CURRENT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
 CHANGES_DETECTED=true
@@ -86,7 +97,7 @@ if [ -f ".last_version_tag" ] && [ -f ".last_version_commit" ]; then
   LAST_COMMIT=$(cat .last_version_commit)
   if [ -n "$LAST_COMMIT" ] && git cat-file -e "$LAST_COMMIT" &>/dev/null; then
     # Check if there are no differences in the folders between the last built commit and current tree
-    if git diff --quiet "$LAST_COMMIT" -- PromptBE/ PromptUI/ PromptVectorIngestion/ && [ -z "$(git status --porcelain -- PromptBE/ PromptUI/ PromptVectorIngestion/)" ]; then
+    if git diff --quiet "$LAST_COMMIT" -- PromptBE/ PromptUI/ PromptVectorIngestion/ PromptChatbot/ && [ -z "$(git status --porcelain -- PromptBE/ PromptUI/ PromptVectorIngestion/ PromptChatbot/)" ]; then
       CHANGES_DETECTED=false
     fi
   fi
@@ -103,6 +114,7 @@ if [ "$CHANGES_DETECTED" = "true" ]; then
   dotnet publish PromptBE/PromptBE.csproj -t:PublishContainer -c Release
   dotnet publish PromptUI/PromptUI.csproj -t:PublishContainer -c Release
   dotnet publish PromptVectorIngestion/PromptVectorIngestion.csproj -t:PublishContainer -c Release
+  dotnet publish PromptChatbot/PromptChatbot.csproj -t:PublishContainer -c Release
 
   echo "=================================================="
   echo "🏷️ Tagging Images with Version & latest"
@@ -119,6 +131,10 @@ if [ "$CHANGES_DETECTED" = "true" ]; then
   docker tag prompt-vector-ingestion:latest "${ACR_LOGIN_SERVER}/prompt-vector-ingestion:${VERSION_TAG}"
   docker tag prompt-vector-ingestion:latest "${ACR_LOGIN_SERVER}/prompt-vector-ingestion:latest"
 
+  # Tag PromptChatbot
+  docker tag prompt-chatbot:latest "${ACR_LOGIN_SERVER}/prompt-chatbot:${VERSION_TAG}"
+  docker tag prompt-chatbot:latest "${ACR_LOGIN_SERVER}/prompt-chatbot:latest"
+
   echo "=================================================="
   echo "📤 Pushing Container Images to ACR"
   echo "=================================================="
@@ -131,16 +147,19 @@ if [ "$CHANGES_DETECTED" = "true" ]; then
   docker push "${ACR_LOGIN_SERVER}/prompt-vector-ingestion:${VERSION_TAG}"
   docker push "${ACR_LOGIN_SERVER}/prompt-vector-ingestion:latest"
 
+  docker push "${ACR_LOGIN_SERVER}/prompt-chatbot:${VERSION_TAG}"
+  docker push "${ACR_LOGIN_SERVER}/prompt-chatbot:latest"
+
   # Cache the tag and built commit locally
   echo "$VERSION_TAG" > .last_version_tag
-  if [ -z "$(git status --porcelain -- PromptBE/ PromptUI/ PromptVectorIngestion/)" ] && [ -n "$CURRENT_COMMIT" ]; then
+  if [ -z "$(git status --porcelain -- PromptBE/ PromptUI/ PromptVectorIngestion/ PromptChatbot/)" ] && [ -n "$CURRENT_COMMIT" ]; then
     echo "$CURRENT_COMMIT" > .last_version_commit
   else
     echo "dirty" > .last_version_commit
   fi
 else
   VERSION_TAG=$(cat .last_version_tag)
-  echo "No changes detected in PromptBE/, PromptUI/, or PromptVectorIngestion/ source code."
+  echo "No changes detected in PromptBE/, PromptUI/, PromptVectorIngestion/, or PromptChatbot/ source code."
   echo "Skipping container rebuild & push. Reusing tag: $VERSION_TAG"
 fi
 
@@ -151,7 +170,7 @@ echo "=================================================="
 az deployment group create \
   --resource-group "$RG_NAME" \
   --template-file "$BICEP_FILE" \
-  --parameters acrName="$ACR_NAME" versionTag="$VERSION_TAG" sqlAdminPassword="$SQL_PASSWORD"
+  --parameters acrName="$ACR_NAME" versionTag="$VERSION_TAG" sqlAdminPassword="$SQL_PASSWORD" githubModelsPat="$GITHUB_PAT"
 
 echo "=================================================="
 echo "🎉 Release Complete!"

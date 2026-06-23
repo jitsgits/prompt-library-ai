@@ -24,8 +24,15 @@ public class ExplorerStateService
     public bool ShowCreateModal { get; set; } = false;
     public bool IsSyncing { get; private set; } = false;
     public string? SyncStatusMessage { get; private set; }
+    public bool IsChatOpen { get; private set; } = false;
 
     public event Action? OnStateChanged;
+
+    public void ToggleChat()
+    {
+        IsChatOpen = !IsChatOpen;
+        NotifyStateChanged();
+    }
 
     public void OpenCreateModal()
     {

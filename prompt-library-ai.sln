@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PromptBE", "PromptBE\Prompt
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PromptVectorIngestion", "PromptVectorIngestion\PromptVectorIngestion.csproj", "{76227235-80C7-4681-B2DF-9CD09EC69D34}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PromptChatbot", "PromptChatbot\PromptChatbot.csproj", "{905674BF-7881-4011-8420-2E75BB80E23C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{76227235-80C7-4681-B2DF-9CD09EC69D34}.Release|x64.Build.0 = Release|Any CPU
 		{76227235-80C7-4681-B2DF-9CD09EC69D34}.Release|x86.ActiveCfg = Release|Any CPU
 		{76227235-80C7-4681-B2DF-9CD09EC69D34}.Release|x86.Build.0 = Release|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Debug|x64.Build.0 = Debug|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Debug|x86.Build.0 = Debug|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Release|x64.ActiveCfg = Release|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Release|x64.Build.0 = Release|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Release|x86.ActiveCfg = Release|Any CPU
+		{905674BF-7881-4011-8420-2E75BB80E23C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

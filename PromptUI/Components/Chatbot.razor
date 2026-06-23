@@ -1,0 +1,246 @@
+@using PromptUI.Services
+@using System.IO
+@using System.Net.Http
+@using System.Net.Http.Json
+@inject ExplorerStateService StateService
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+@implements IDisposable
+
+<div class="chatbot-drawer @(StateService.IsChatOpen ? "open" : "")">
+    <div class="chatbot-header">
+        <div class="d-flex align-items-center gap-2">
+            <div class="chatbot-logo">
+                <i class="bi bi-robot"></i>
+            </div>
+            <div>
+                <h4 class="m-0 chatbot-title">Prompt Assistant</h4>
+                <span class="chatbot-subtitle">GPT-4o-mini grounded in Search</span>
+            </div>
+        </div>
+        <button class="chatbot-close-btn" @onclick="ToggleChat">
+            <i class="bi bi-x-lg"></i>
+        </button>
+    </div>
+
+    <div class="chatbot-messages" id="chatbot-messages-list">
+        @foreach (var msg in messages)
+        {
+            <div class="chat-message @(msg.Role == "user" ? "user-message" : "assistant-message")">
+                <div class="message-avatar">
+                    @if (msg.Role == "user")
+                    {
+                        <i class="bi bi-person-fill"></i>
+                    }
+                    else
+                    {
+                        <i class="bi bi-robot"></i>
+                    }
+                </div>
+                <div class="message-content-bubble">
+                    @if (string.IsNullOrEmpty(msg.Content) && isSending && msg == messages.Last())
+                    {
+                        <div class="typing-indicator">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="markdown-body">
+                            @((MarkupString)FormatMarkdown(msg.Content))
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="chatbot-footer">
+        <div class="input-group">
+            <input type="text" 
+                   class="form-control chatbot-input" 
+                   @bind="userInput" 
+                   @onkeyup="HandleKeyUp"
+                   placeholder="Ask about prompt engineering..." 
+                   disabled="@isSending" />
+            <button class="btn btn-chatbot-send" 
+                    @onclick="SendMessage" 
+                    disabled="@(isSending || string.IsNullOrWhiteSpace(userInput))">
+                <i class="bi bi-send-fill"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+@if (!StateService.IsChatOpen)
+{
+    <button class="chatbot-floating-trigger-btn" @onclick="ToggleChat">
+        <i class="bi bi-chat-dots-fill"></i>
+        <span class="pulse-ring"></span>
+    </button>
+}
+
+@code {
+    private List<ChatMessage> messages = new()
+    {
+        new ChatMessage { Role = "assistant", Content = "Hello! I am your Prompt Library assistant. Ask me anything about prompt engineering or prompts in your library." }
+    };
+
+    private string userInput = "";
+    private bool isSending = false;
+
+    protected override void OnInitialized()
+    {
+        StateService.OnStateChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        StateService.OnStateChanged -= StateHasChanged;
+    }
+
+    private void ToggleChat()
+    {
+        StateService.ToggleChat();
+    }
+
+    private async Task HandleKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(userInput) || isSending) return;
+
+        var userMsg = userInput.Trim();
+        userInput = "";
+        
+        messages.Add(new ChatMessage { Role = "user", Content = userMsg });
+        isSending = true;
+        StateHasChanged();
+        await ScrollToBottom();
+
+        // Create a response placeholder
+        var assistantMsg = new ChatMessage { Role = "assistant", Content = "" };
+        messages.Add(assistantMsg);
+        StateHasChanged();
+        await ScrollToBottom();
+
+        try
+        {
+            using var client = new HttpClient();
+            client.Timeout = TimeSpan.FromMinutes(2);
+
+            var chatbotUrl = Configuration["ChatbotUrl"] ?? "http://localhost:5135";
+            var requestUrl = $"{chatbotUrl.TrimEnd('/')}/api/chat";
+
+            // Construct request body
+            var chatRequest = new
+            {
+                message = userMsg,
+                history = messages
+                    .Take(messages.Count - 2) // exclude userMsg and the empty assistantMsg placeholder
+                    .Select(m => new { role = m.Role, content = m.Content })
+                    .ToList()
+            };
+
+            var response = await client.PostAsJsonAsync(requestUrl, chatRequest);
+            if (response.IsSuccessStatusCode)
+            {
+                using var stream = await response.Content.ReadAsStreamAsync();
+                using var reader = new StreamReader(stream);
+                char[] buffer = new char[128];
+                int read;
+                while ((read = await reader.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    var chunk = new string(buffer, 0, read);
+                    assistantMsg.Content += chunk;
+                    StateHasChanged();
+                    await ScrollToBottom();
+                }
+            }
+            else
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                assistantMsg.Content = $"Error: {response.ReasonPhrase}. Details: {err}";
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            assistantMsg.Content = $"Error connecting to chatbot service: {ex.Message}";
+            StateHasChanged();
+        }
+        finally
+        {
+            isSending = false;
+            StateHasChanged();
+            await ScrollToBottom();
+        }
+    }
+
+    private async Task ScrollToBottom()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("scrollChatToBottom", "chatbot-messages-list");
+        }
+        catch
+        {
+            // Ignore JS errors on prerendering or initialization
+        }
+    }
+
+    private string FormatMarkdown(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+
+        // Escape basic HTML
+        var html = text
+            .Replace("&", "&amp;")
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;");
+
+        // Code blocks: ```content```
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"```([\s\S]*?)```", m => 
+            $"<pre class='chat-code-block'><code>{m.Groups[1].Value.Trim()}</code></pre>");
+
+        // Inline code: `content`
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"`([^`]+)`", "<code>$1</code>");
+
+        // Bold: **content**
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"\*\*([^*]+)\*\*", "<strong>$1</strong>");
+
+        // Bullet points: * content or - content
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"^\s*[\*\-]\s+(.+)$", "<li>$1</li>", System.Text.RegularExpressions.RegexOptions.Multiline);
+        // Wrap lists in ul
+        html = html.Replace("</li>\n<li>", "</li><li>");
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"(<li>.*</li>)", "<ul>$1</ul>");
+
+        // Blockquotes: > content
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"^&gt;\s+(.+)$", "<blockquote>$1</blockquote>", System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        // Headers: ### content, ## content, # content
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"^###\s+(.+)$", "<h5>$1</h5>", System.Text.RegularExpressions.RegexOptions.Multiline);
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"^##\s+(.+)$", "<h4>$1</h4>", System.Text.RegularExpressions.RegexOptions.Multiline);
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"^#\s+(.+)$", "<h3>$1</h3>", System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        // Line breaks
+        html = html.Replace("\n", "<br />");
+
+        return html;
+    }
+
+    public class ChatMessage
+    {
+        public string Role { get; set; } = "";
+        public string Content { get; set; } = "";
+        public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    }
+}
