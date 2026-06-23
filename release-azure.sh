@@ -79,11 +79,13 @@ fi
 echo "=================================================="
 echo "🔍 Checking for code changes in PromptBE or PromptUI"
 echo "=================================================="
+CURRENT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
 CHANGES_DETECTED=true
 
-if [ -f ".last_version_tag" ]; then
-  # Check if there are uncommitted changes or differences from HEAD in the project folders
-  if [ -z "$(git status --porcelain -- PromptBE/ PromptUI/)" ] && git diff --quiet HEAD -- PromptBE/ PromptUI/; then
+if [ -f ".last_version_tag" ] && [ -f ".last_version_commit" ]; then
+  LAST_COMMIT=$(cat .last_version_commit)
+  # Check if the commit hasn't changed AND there are no uncommitted changes in the folders
+  if [ "$CURRENT_COMMIT" = "$LAST_COMMIT" ] && [ -n "$CURRENT_COMMIT" ] && [ -z "$(git status --porcelain -- PromptBE/ PromptUI/)" ]; then
     CHANGES_DETECTED=false
   fi
 fi
@@ -119,8 +121,13 @@ if [ "$CHANGES_DETECTED" = "true" ]; then
   docker push "${ACR_LOGIN_SERVER}/prompt-ui:${VERSION_TAG}"
   docker push "${ACR_LOGIN_SERVER}/prompt-ui:latest"
 
-  # Cache the tag locally
+  # Cache the tag and built commit locally
   echo "$VERSION_TAG" > .last_version_tag
+  if [ -z "$(git status --porcelain -- PromptBE/ PromptUI/)" ] && [ -n "$CURRENT_COMMIT" ]; then
+    echo "$CURRENT_COMMIT" > .last_version_commit
+  else
+    echo "dirty" > .last_version_commit
+  fi
 else
   VERSION_TAG=$(cat .last_version_tag)
   echo "No changes detected in PromptBE/ or PromptUI/ source code."
