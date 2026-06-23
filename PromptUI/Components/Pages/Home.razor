@@ -1,6 +1,8 @@
 @page "/"
+@page "/prompt/{PromptId}"
 @rendermode InteractiveServer
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
 @implements IDisposable
 
 <PageTitle>Prompt Library Dashboard</PageTitle>
@@ -164,6 +166,9 @@
 @code {
     [Inject] public ExplorerStateService StateService { get; set; } = default!;
 
+    [Parameter]
+    public string? PromptId { get; set; }
+
     private string? copiedPromptId;
 
     protected override async Task OnInitializedAsync()
@@ -173,6 +178,30 @@
         if (!StateService.Prompts.Any())
         {
             await LoadPrompts();
+        }
+
+        ApplyPromptParameterSelection();
+    }
+
+    protected override void OnParametersSet()
+    {
+        ApplyPromptParameterSelection();
+    }
+
+    private void ApplyPromptParameterSelection()
+    {
+        if (!string.IsNullOrEmpty(PromptId) && StateService.Prompts.Any())
+        {
+            var prompt = StateService.Prompts.FirstOrDefault(p => p.Id == PromptId);
+            if (prompt != null)
+            {
+                StateService.SelectedPrompt = prompt;
+                StateService.SelectedCategory = prompt.Category;
+            }
+        }
+        else if (string.IsNullOrEmpty(PromptId))
+        {
+            StateService.SelectedPrompt = null;
         }
     }
 
@@ -186,9 +215,15 @@
         await StateService.LoadPrompts();
     }
 
-    private void DeselectPrompt() => StateService.DeselectPrompt();
+    private void DeselectPrompt()
+    {
+        Navigation.NavigateTo("/");
+    }
     
-    private void SelectPrompt(Prompt prompt) => StateService.SelectPrompt(prompt);
+    private void SelectPrompt(Prompt prompt)
+    {
+        Navigation.NavigateTo($"/prompt/{prompt.Id}");
+    }
     
     private void ToggleTag(string tag) => StateService.ToggleTag(tag);
 
@@ -219,7 +254,7 @@
     {
         StateService.Prompts.Add(created);
         StateService.ExpandedCategories.Add(created.Category);
-        StateService.SelectedPrompt = created;
         StateService.CloseCreateModal();
+        Navigation.NavigateTo($"/prompt/{created.Id}");
     }
 }

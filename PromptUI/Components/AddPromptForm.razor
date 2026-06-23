@@ -1,6 +1,8 @@
 @using System.ComponentModel.DataAnnotations
 @using PromptUI.Models
+@using PromptUI.Services
 @inject HttpClient Http
+@inject ExplorerStateService StateService
 
 <div class="glass-card modal-content-glass modal-content-glass-fullscreen m-3">
     <h3 class="mb-4 text-center">Add New Prompt</h3>
@@ -33,12 +35,19 @@
             <div class="row">
                 <div class="col-sm-6 mb-3 mb-sm-0">
                     <label class="form-label text-secondary small">Category</label>
-                    <InputSelect class="form-select premium-select" @bind-Value="newPromptModel.Category">
-                        <option value="Coding">Coding</option>
-                        <option value="Analysis">Analysis</option>
-                        <option value="Creative">Creative</option>
-                        <option value="Marketing">Marketing</option>
+                    <InputSelect class="form-select premium-select" @bind-Value="selectedCategory">
+                        @foreach (var cat in availableCategories)
+                        {
+                            <option value="@cat">@cat</option>
+                        }
+                        <option value="__new__">+ New category...</option>
                     </InputSelect>
+                    @if (selectedCategory == "__new__")
+                    {
+                        <input type="text" class="form-control premium-input mt-2"
+                               @bind="customCategory"
+                               placeholder="Enter new category name" />
+                    }
                 </div>
                 <div class="col-sm-6 mb-3">
                     <label class="form-label text-secondary small">Tags (comma separated)</label>
@@ -68,10 +77,23 @@
     [Parameter] public EventCallback<Prompt> OnPromptSaved { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
-    private PromptModel newPromptModel = new() { Category = "Coding" };
+    private PromptModel newPromptModel = new();
     private string tagsInput = "";
     private bool isSubmitting = false;
     private string? errorMessage;
+    private string selectedCategory = "";
+    private string customCategory = "";
+    private List<string> availableCategories = new();
+
+    protected override void OnInitialized()
+    {
+        availableCategories = StateService.Categories.ToList();
+        if (!availableCategories.Any())
+        {
+            availableCategories = new List<string> { "Coding", "Analysis", "Creative", "Marketing" };
+        }
+        selectedCategory = availableCategories.First();
+    }
 
     private async Task Cancel()
     {
@@ -89,12 +111,16 @@
                        .Select(t => t.Trim().ToLowerInvariant())
                        .ToArray();
 
+        var resolvedCategory = selectedCategory == "__new__"
+            ? (string.IsNullOrWhiteSpace(customCategory) ? "General" : customCategory.Trim())
+            : selectedCategory;
+
         var payload = new Prompt(
             "",
             newPromptModel.Title ?? "",
             newPromptModel.Description ?? "",
             newPromptModel.PromptText ?? "",
-            newPromptModel.Category ?? "Coding",
+            resolvedCategory,
             parsedTags,
             DateTime.UtcNow
         );

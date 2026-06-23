@@ -143,6 +143,7 @@ app.MapPost("/api/chat", async (
             searchOptions.Select.Add("title");
             searchOptions.Select.Add("content");
             searchOptions.Select.Add("category");
+            searchOptions.Select.Add("promptId");
             
             var searchResult = await searchClient.SearchAsync<SearchDocument>("*", searchOptions);
             await foreach (var result in searchResult.Value.GetResultsAsync())
@@ -150,7 +151,8 @@ app.MapPost("/api/chat", async (
                 if (result.Document.TryGetValue("content", out var contentVal) && contentVal != null)
                 {
                     var title = result.Document.TryGetValue("title", out var titleVal) ? titleVal.ToString() : "Untitled";
-                    retrievedChunks.Add($"[{title}]: {contentVal}");
+                    var promptId = result.Document.TryGetValue("promptId", out var promptIdVal) ? promptIdVal.ToString() : "";
+                    retrievedChunks.Add($"[Prompt: {title}](/prompt/{promptId}): {contentVal}");
                 }
             }
 

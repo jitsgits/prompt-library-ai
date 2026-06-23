@@ -11,7 +11,7 @@
     <div class="chatbot-header">
         <div class="d-flex align-items-center gap-2">
             <div class="chatbot-logo">
-                <i class="bi bi-robot"></i>
+                <i class="bi bi-robot" style="font-size: 1.5rem; color: var(--text-primary);"></i>
             </div>
             <div>
                 <h4 class="m-0 chatbot-title">Prompt Assistant</h4>
@@ -30,7 +30,7 @@
                 <div class="message-avatar">
                     @if (msg.Role == "user")
                     {
-                        <i class="bi bi-person-fill"></i>
+                        <img src="/images/user-avatar.png" alt="User" class="chat-avatar-img" />
                     }
                     else
                     {
@@ -77,12 +77,14 @@
 @if (!StateService.IsChatOpen)
 {
     <button class="chatbot-floating-trigger-btn" @onclick="ToggleChat">
-        <i class="bi bi-chat-dots-fill"></i>
+        <i class="bi bi-robot"></i>
         <span class="pulse-ring"></span>
     </button>
 }
 
 @code {
+    [Inject] public NavigationManager Navigation { get; set; } = default!;
+
     private List<ChatMessage> messages = new()
     {
         new ChatMessage { Role = "assistant", Content = "Hello! I am your Prompt Library assistant. Ask me anything about prompt engineering or prompts in your library." }
@@ -94,11 +96,21 @@
     protected override void OnInitialized()
     {
         StateService.OnStateChanged += StateHasChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (StateService.IsChatOpen)
+        {
+            StateService.ToggleChat();
+        }
     }
 
     public void Dispose()
     {
         StateService.OnStateChanged -= StateHasChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
     }
 
     private void ToggleChat()
@@ -230,6 +242,9 @@
         html = System.Text.RegularExpressions.Regex.Replace(html, @"^###\s+(.+)$", "<h5>$1</h5>", System.Text.RegularExpressions.RegexOptions.Multiline);
         html = System.Text.RegularExpressions.Regex.Replace(html, @"^##\s+(.+)$", "<h4>$1</h4>", System.Text.RegularExpressions.RegexOptions.Multiline);
         html = System.Text.RegularExpressions.Regex.Replace(html, @"^#\s+(.+)$", "<h3>$1</h3>", System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        // Links: [text](url)
+        html = System.Text.RegularExpressions.Regex.Replace(html, @"\[([^\]]+)\]\(([^)]+)\)", "<a href='$2' class='chat-link'>$1</a>");
 
         // Line breaks
         html = html.Replace("\n", "<br />");

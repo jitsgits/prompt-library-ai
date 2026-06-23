@@ -1,6 +1,8 @@
+@inject NavigationManager Navigation
+
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
-        <a class="navbar-brand" href="" style="font-family: 'Outfit', sans-serif; font-weight: 700; background: linear-gradient(135deg, #a855f7, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">PromptLib AI</a>
+        <a class="navbar-brand" href="" style="font-family: 'Outfit', sans-serif; font-weight: 700; background: linear-gradient(135deg, #ffffff, #a3a3a3); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">PromptLib AI</a>
     </div>
 </div>
 
@@ -9,10 +11,6 @@
 <div class="nav-scrollable">
     <nav class="nav flex-column pt-3">
         <div class="px-3">
-            <div class="text-uppercase small text-muted mb-2 px-1 fw-bold" style="font-size: 0.75rem; letter-spacing: 0.05em;">
-                <i class="bi bi-folder2-open text-purple me-1"></i> Explorer
-            </div>
-            
             @if (StateService.IsLoading)
             {
                 <div class="text-center py-3">
@@ -27,6 +25,33 @@
             }
             else
             {
+                <!-- Tags Filtering Cloud -->
+                <div class="tag-explorer-section px-1 mb-4" style="border-top: none; padding-top: 0; margin-top: 0;">
+                    <div class="text-uppercase small text-white mb-2 fw-bold" style="font-size: 0.75rem; letter-spacing: 0.05em;">
+                        <i class="bi bi-tags text-purple me-1"></i> Filter by Tags
+                    </div>
+                    <div class="tag-scroll-container" style="max-height: 300px; overflow-y: auto; padding-right: 4px; border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem; background: rgba(255, 255, 255, 0.01);">
+                        <div class="tag-cloud">
+                            @foreach (var tag in StateService.AllTags)
+                            {
+                                <span class="tag-cloud-item @(StateService.SelectedTags.Contains(tag) ? "active" : "")" 
+                                      @onclick="() => StateService.ToggleTag(tag)"
+                                      style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">
+                                    #@tag
+                                </span>
+                            }
+                            @if (!StateService.AllTags.Any())
+                            {
+                                <span class="small text-muted" style="font-size: 0.75rem;">No tags available</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-uppercase small text-muted mb-2 px-1 fw-bold" style="font-size: 0.75rem; letter-spacing: 0.05em;">
+                    <i class="bi bi-folder2-open text-purple me-1"></i> Explorer
+                </div>
+
                 <!-- Hierarchy Tree -->
                 <ul class="tree-list">
                     @foreach (var cat in StateService.Categories)
@@ -45,7 +70,7 @@
                                 @foreach (var prompt in catPrompts)
                                 {
                                     <li class="tree-leaf @(StateService.SelectedPrompt?.Id == prompt.Id ? "active" : "")" 
-                                        @onclick="() => StateService.SelectPrompt(prompt)"
+                                        @onclick="() => SelectPrompt(prompt)"
                                         @onclick:stopPropagation="true">
                                         <i class="leaf-icon bi bi-file-earmark-text" style="font-size: 0.85rem;"></i>
                                         <span class="text-truncate" style="max-width: 130px; font-size: 0.82rem;">@prompt.Title</span>
@@ -59,27 +84,6 @@
                         </li>
                     }
                 </ul>
-
-                <!-- Tags Filtering Cloud -->
-                <div class="tag-explorer-section mt-4 px-1">
-                    <div class="text-uppercase small text-white mb-2 fw-bold" style="font-size: 0.75rem; letter-spacing: 0.05em;">
-                        <i class="bi bi-tags text-purple me-1"></i> Filter by Tags
-                    </div>
-                    <div class="tag-cloud">
-                        @foreach (var tag in StateService.AllTags)
-                        {
-                            <span class="tag-cloud-item @(StateService.SelectedTags.Contains(tag) ? "active" : "")" 
-                                  @onclick="() => StateService.ToggleTag(tag)"
-                                  style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">
-                                #@tag
-                            </span>
-                        }
-                        @if (!StateService.AllTags.Any())
-                        {
-                            <span class="small text-muted" style="font-size: 0.75rem;">No tags available</span>
-                        }
-                    </div>
-                </div>
             }
         </div>
     </nav>
@@ -91,6 +95,11 @@
     protected override void OnInitialized()
     {
         StateService.OnStateChanged += StateHasChanged;
+    }
+
+    private void SelectPrompt(Prompt prompt)
+    {
+        Navigation.NavigateTo($"/prompt/{prompt.Id}");
     }
 
     public void Dispose()

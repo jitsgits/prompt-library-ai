@@ -151,7 +151,14 @@ app.MapPost("/api/ingest-prompt", [Topic("pubsub", "prompts")] async (
 
     log.LogInformation("Received ingestion event for Prompt ID: {Id}, Name: {Title}", payload.Id, payload.Title);
 
-    var textToChunk = $"{payload.Title}\n{payload.Description}\n{payload.PromptText}";
+    // Weight important fields more heavily by repeating them with labels
+    var titlePart = $"Title: {payload.Title}";
+    var categoryPart = !string.IsNullOrWhiteSpace(payload.Category) ? $"Category: {payload.Category}" : "";
+    var tagsPart = payload.Tags != null && payload.Tags.Length > 0 ? $"Tags: {string.Join(", ", payload.Tags)}" : "";
+    var weightedTitle = string.Join(" ", Enumerable.Repeat(titlePart, 3));
+    var weightedCategory = string.Join(" ", Enumerable.Repeat(categoryPart, 2));
+    var weightedTags = string.Join(" ", Enumerable.Repeat(tagsPart, 2));
+    var textToChunk = $"{weightedTitle}\n{weightedCategory}\n{weightedTags}\n{payload.Description}\n{payload.PromptText}";
     var chunks = ChunkText(textToChunk, 500);
 
     var docs = new List<PromptSearchDocument>();
@@ -320,7 +327,13 @@ app.MapPost("/api/bulk-ingest", async (
     var docs = new List<PromptSearchDocument>();
     foreach (var payload in payloads)
     {
-        var textToChunk = $"{payload.Title}\n{payload.Description}\n{payload.PromptText}";
+        var titlePart = $"Title: {payload.Title}";
+        var categoryPart = !string.IsNullOrWhiteSpace(payload.Category) ? $"Category: {payload.Category}" : "";
+        var tagsPart = payload.Tags != null && payload.Tags.Length > 0 ? $"Tags: {string.Join(", ", payload.Tags)}" : "";
+        var weightedTitle = string.Join(" ", Enumerable.Repeat(titlePart, 3));
+        var weightedCategory = string.Join(" ", Enumerable.Repeat(categoryPart, 2));
+        var weightedTags = string.Join(" ", Enumerable.Repeat(tagsPart, 2));
+        var textToChunk = $"{weightedTitle}\n{weightedCategory}\n{weightedTags}\n{payload.Description}\n{payload.PromptText}";
         var chunks = ChunkText(textToChunk, 500);
 
         int chunkIdx = 0;
