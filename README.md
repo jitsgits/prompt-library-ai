@@ -4,7 +4,9 @@ A full-stack **AI-powered Prompt Library** that demonstrates a production-qualit
 
 ## 🖥️ Application Demo
 
-![Application Demo](PromptUI/wwwroot/images/demo.png)
+[![Application Demo Video](PromptUI/wwwroot/images/demo.png)](https://youtu.be/DzLHuKP17gY)
+
+*Click the image above or watch the [YouTube Demo Video](https://youtu.be/DzLHuKP17gY) to see the application in action.*
 
 ## ☁️ Azure Components
 
