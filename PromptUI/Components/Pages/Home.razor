@@ -195,13 +195,18 @@
             var prompt = StateService.Prompts.FirstOrDefault(p => p.Id == PromptId);
             if (prompt != null)
             {
-                StateService.SelectedPrompt = prompt;
-                StateService.SelectedCategory = prompt.Category;
+                if (StateService.SelectedPrompt?.Id != prompt.Id)
+                {
+                    StateService.SelectPrompt(prompt);
+                }
             }
         }
         else if (string.IsNullOrEmpty(PromptId))
         {
-            StateService.SelectedPrompt = null;
+            if (StateService.SelectedPrompt != null)
+            {
+                StateService.DeselectPrompt();
+            }
         }
     }
 

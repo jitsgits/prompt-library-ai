@@ -343,6 +343,10 @@ resource promptVectorIngestionApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'search-api-key'
           value: searchService.listAdminKeys().primaryKey
         }
+        {
+          name: 'github-models-pat'
+          value: githubModelsPat
+        }
       ]
       dapr: {
         enabled: true
@@ -367,6 +371,18 @@ resource promptVectorIngestionApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'SearchService__IndexName'
               value: 'prompts-index'
+            }
+            {
+              name: 'AzureOpenAI__Endpoint'
+              value: 'https://models.inference.ai.azure.com'
+            }
+            {
+              name: 'AzureOpenAI__ApiKey'
+              secretRef: 'github-models-pat'
+            }
+            {
+              name: 'AzureOpenAI__EmbeddingDeploymentName'
+              value: 'text-embedding-3-small'
             }
           ]
           resources: {
@@ -446,6 +462,10 @@ resource promptChatbotApp 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'AzureOpenAI__DeploymentName'
               value: 'gpt-4o-mini'
+            }
+            {
+              name: 'AzureOpenAI__EmbeddingDeploymentName'
+              value: 'text-embedding-3-small'
             }
           ]
           resources: {

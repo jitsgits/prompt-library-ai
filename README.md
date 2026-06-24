@@ -85,7 +85,7 @@ prompt-vector-ingestion  (subscribes to "prompts" topic via Dapr)
    │  ├─ Builds weighted embedding text:
    │  │     Title (×3) → Category (×2) → Tags (×2) → Description → PromptText
    │  ├─ Splits text into 500-char chunks
-   │  ├─ 4. Generates embedding vector for each chunk (1536-dim)
+   │  ├─ 4. Generates embedding vector for each chunk (1536-dim, text-embedding-3-small)
    │  └─ 5. Uploads PromptSearchDocument(s) to Azure AI Search index
    │
    ▼
@@ -98,7 +98,7 @@ Azure AI Search  ("prompts-index")
 1. **Save to SQL** — `PromptBE` writes the prompt to Azure SQL Database, creating or reusing the Category and Tag entities via EF Core.
 2. **Publish event** — `PromptBE` uses the Dapr client to publish a JSON payload to the `pubsub` Dapr component, targeting the `prompts` topic. Dapr routes this through Azure Event Hubs.
 3. **Receive event** — `PromptVectorIngestion` has a Dapr topic subscription on `POST /api/ingest-prompt`. It receives the payload asynchronously.
-4. **Chunk & embed** — The service builds a weighted text representation (title and category/tags are repeated to give them higher semantic weight) and splits it into 500-character chunks. A 1536-dimension embedding vector is generated for each chunk.
+4. **Chunk & embed** — The service builds a weighted text representation (title and category/tags are repeated to give them higher semantic weight) and splits it into 500-character chunks. A 1536-dimension embedding vector is generated for each chunk using the **`text-embedding-3-small`** model via GitHub Models. If the OpenAI endpoint is unconfigured or fails, the service falls back to a deterministic, **SHA-256-seeded pseudo-random vector generation** that ensures consistent, stable embeddings across processes (resolving previous process-randomized hash issues).
 5. **Index** — Each chunk becomes a `PromptSearchDocument` uploaded to the Azure AI Search `prompts-index` HNSW index. Old chunks for the same `promptId` are deleted first to prevent orphans.
 
 ---
@@ -110,14 +110,19 @@ When a user types a question in the chatbot:
 ```
 User query  →  prompt-chatbot
                   │
-                  ├─ 1. Generate embedding vector for the user query (1536-dim)
-                  ├─ 2. KNN vector search against Azure AI Search (top 3 chunks)
+                  ├─ 1. Generate embedding vector for user query (1536-dim, text-embedding-3-small)
+                  ├─ 2. Hybrid search against Azure AI Search (BM25 keyword search + KNN vector search, top 5 chunks)
                   ├─ 3. Build grounded system prompt (grounding.txt + retrieved chunks)
                   ├─ 4. POST to GitHub Models GPT-4o-mini  (/chat/completions)
                   └─ 5. Stream response back to PromptUI  →  User
 ```
 
-Retrieved chunks include the prompt title and a relative URL (`/prompt/{id}`) so the LLM can include **clickable links** to specific prompts in its response.
+### Retrieval & Hybrid Merging Details
+
+- **Embedding Generation**: The query is converted to a 1536-dimension embedding vector using the `text-embedding-3-small` model (or the deterministic seed-based fallback).
+- **Hybrid Search**: To ensure high relevance and overcome purely semantic retrieval gaps (e.g. matching specific exact keywords, category names, or tags), the query is run as a **hybrid search** in Azure AI Search. It executes a classic text search (using BM25 keyword matching) and a vector search ($K$-nearest neighbors = 5) in parallel.
+- **RRF Reranking**: Azure AI Search combines the text and vector search results using **Reciprocal Rank Fusion (RRF)** to produce a single, unified list of top 5 chunks.
+- **Grounded References**: Retrieved chunks include the prompt title and a relative URL (`/prompt/{id}`) so the LLM can generate **clickable links** to specific prompts in its response.
 
 ---
 
@@ -139,13 +144,14 @@ Retrieved chunks include the prompt title and a relative URL (`/prompt/{id}`) so
 - Subscribes to Dapr `prompts` topic via `POST /api/ingest-prompt`.
 - Exposes `POST /api/bulk-ingest` for batch re-indexing and `POST /api/reset-index` to recreate the search index.
 - Generates weighted embedding text: **Title × 3, Category × 2, Tags × 2**, then body text — ensuring key metadata dominates the vector space.
+- Generates 1536-dimension vectors using the **`text-embedding-3-small`** model with a stable SHA-256-seeded deterministic fallback.
 - Deletes stale chunks for a prompt before re-uploading to keep the index clean.
 
 ### [`PromptChatbot`](PromptChatbot/) — RAG API
 - Exposes `POST /api/chat` with streaming response (`text/plain`).
-- Implements the full RAG loop: embed query → vector search → build grounded prompt → call LLM → stream tokens.
+- Implements the full RAG loop: embed query → hybrid search (BM25 keyword + HNSW vector) → HNSW vector query (KNN=5) + text query merged via Reciprocal Rank Fusion (RRF) → build grounded prompt → call LLM → stream tokens.
 - Grounding instructions are loaded from [`grounding.txt`](PromptChatbot/grounding.txt) at runtime, allowing behaviour to be updated without a redeploy.
-- Falls back to a simulated streaming response if the LLM endpoint is not configured.
+- Falls back to a simulated streaming response and deterministic seed-seeded pseudo-random embeddings if the LLM endpoint is not configured.
 
 ---
 

@@ -18,7 +18,23 @@ public class ExplorerStateService
     public string SelectedCategory { get; set; } = "All";
     public HashSet<string> SelectedTags { get; set; } = new();
     public HashSet<string> ExpandedCategories { get; set; } = new();
-    public Prompt? SelectedPrompt { get; set; }
+
+    private Prompt? _selectedPrompt;
+    public Prompt? SelectedPrompt
+    {
+        get => _selectedPrompt;
+        set
+        {
+            _selectedPrompt = value;
+            if (value != null)
+            {
+                if (!ExpandedCategories.Contains(value.Category))
+                {
+                    ExpandedCategories.Add(value.Category);
+                }
+            }
+        }
+    }
 
     public string? CopiedPromptId { get; set; }
     public bool ShowCreateModal { get; set; } = false;

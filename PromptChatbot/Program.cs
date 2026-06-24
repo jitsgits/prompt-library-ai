@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
@@ -124,14 +124,18 @@ app.MapPost("/api/chat", async (
             log.LogInformation("Connecting to Azure AI Search to fetch relevant chunks...");
             var searchClient = new SearchClient(new Uri(searchEndpoint), indexName, new AzureKeyCredential(searchApiKey ?? ""));
 
-            // Generate mock embedding aligned with the search index mock generator
-            var queryVector = GenerateMockEmbedding(request.Message);
-            var searchOptions = new SearchOptions();
+            // Generate real embedding for the user query
+            var queryVector = await GenerateEmbeddingAsync(request.Message, configuration, log);
+            var searchOptions = new SearchOptions
+            {
+                Size = 5
+            };
             
-            // Perform vectorized search query
+            // Hybrid search: text (BM25 on title/category/tags/content) + vector (KNN)
+            // Azure AI Search merges both via Reciprocal Rank Fusion (RRF)
             var vectorQuery = new VectorizedQuery(queryVector)
             {
-                KNearestNeighborsCount = 3
+                KNearestNeighborsCount = 5
             };
             vectorQuery.Fields.Add("vector");
             
@@ -143,9 +147,11 @@ app.MapPost("/api/chat", async (
             searchOptions.Select.Add("title");
             searchOptions.Select.Add("content");
             searchOptions.Select.Add("category");
+            searchOptions.Select.Add("tags");
             searchOptions.Select.Add("promptId");
             
-            var searchResult = await searchClient.SearchAsync<SearchDocument>("*", searchOptions);
+            // Pass message as text query to activate hybrid BM25+vector mode
+            var searchResult = await searchClient.SearchAsync<SearchDocument>(request.Message, searchOptions);
             await foreach (var result in searchResult.Value.GetResultsAsync())
             {
                 if (result.Document.TryGetValue("content", out var contentVal) && contentVal != null)
@@ -193,10 +199,15 @@ app.MapPost("/api/chat", async (
                 new SystemChatMessage(groundingPrompt)
             };
 
-            // Add history
+            // Add history (limit to last 6 messages to prevent HTTP 413 payload token limit issues)
             if (request.History != null)
             {
-                foreach (var hist in request.History)
+                var historyToProcess = request.History;
+                if (historyToProcess.Count > 6)
+                {
+                    historyToProcess = historyToProcess.Skip(historyToProcess.Count - 6).ToList();
+                }
+                foreach (var hist in historyToProcess)
                 {
                     if (hist.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
                     {
@@ -212,8 +223,12 @@ app.MapPost("/api/chat", async (
             // Add user message
             messages.Add(new UserChatMessage(request.Message));
 
-            // Stream response
-            var responseStream = chatClient.CompleteChatStreamingAsync(messages);
+            // Stream response with limit on output tokens
+            var chatOptions = new ChatCompletionOptions
+            {
+                MaxOutputTokenCount = 1500
+            };
+            var responseStream = chatClient.CompleteChatStreamingAsync(messages, chatOptions);
             await foreach (var update in responseStream)
             {
                 if (update.ContentUpdate != null)
@@ -255,11 +270,43 @@ app.MapPost("/api/chat", async (
 
 app.Run();
 
-static float[] GenerateMockEmbedding(string text)
+static async Task<float[]> GenerateEmbeddingAsync(string text, IConfiguration config, ILogger log)
 {
-    float[] vector = new float[1536];
-    int seed = text.GetHashCode();
+    var endpoint = config["AzureOpenAI:Endpoint"];
+    var apiKey = config["AzureOpenAI:ApiKey"];
+    var model = config["AzureOpenAI:EmbeddingDeploymentName"] ?? "text-embedding-3-small";
+
+    if (!string.IsNullOrEmpty(endpoint) && !string.IsNullOrEmpty(apiKey))
+    {
+        try
+        {
+            var openAiClient = new OpenAIClient(
+                new System.ClientModel.ApiKeyCredential(apiKey),
+                new OpenAIClientOptions { Endpoint = new Uri(endpoint) });
+            var embeddingClient = openAiClient.GetEmbeddingClient(model);
+            var result = await embeddingClient.GenerateEmbeddingAsync(text);
+            return result.Value.ToFloats().ToArray();
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Real embedding failed (model={Model}). Using stable deterministic fallback.", model);
+        }
+    }
+    else
+    {
+        log.LogDebug("AzureOpenAI not configured — using stable deterministic embedding fallback.");
+    }
+
+    return GenerateStableMockEmbedding(text);
+}
+
+// SHA-256-seeded deterministic fallback: consistent across all processes (unlike GetHashCode)
+static float[] GenerateStableMockEmbedding(string text)
+{
+    var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
+    int seed = BitConverter.ToInt32(hashBytes, 0);
     var rand = new Random(seed);
+    float[] vector = new float[1536];
     double sumOfSquares = 0;
     for (int i = 0; i < 1536; i++)
     {
@@ -268,12 +315,8 @@ static float[] GenerateMockEmbedding(string text)
     }
     double length = Math.Sqrt(sumOfSquares);
     if (length > 0)
-    {
         for (int i = 0; i < 1536; i++)
-        {
             vector[i] = (float)(vector[i] / length);
-        }
-    }
     return vector;
 }
 

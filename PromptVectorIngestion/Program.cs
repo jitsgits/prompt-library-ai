@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
@@ -17,6 +19,7 @@ using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Indexes.Models;
 using Azure.Search.Documents.Models;
 using Dapr;
+using OpenAI;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -165,7 +168,7 @@ app.MapPost("/api/ingest-prompt", [Topic("pubsub", "prompts")] async (
     int chunkIdx = 0;
     foreach (var chunk in chunks)
     {
-        var embedding = GenerateMockEmbedding(chunk);
+        var embedding = await GenerateEmbeddingAsync(chunk, configuration, log);
         docs.Add(new PromptSearchDocument
         {
             Id = $"{payload.Id}_{chunkIdx}",
@@ -339,7 +342,7 @@ app.MapPost("/api/bulk-ingest", async (
         int chunkIdx = 0;
         foreach (var chunk in chunks)
         {
-            var embedding = GenerateMockEmbedding(chunk);
+            var embedding = await GenerateEmbeddingAsync(chunk, configuration, log);
             docs.Add(new PromptSearchDocument
             {
                 Id = $"{payload.Id}_{chunkIdx}",
@@ -396,11 +399,43 @@ static List<string> ChunkText(string text, int maxChunkLength)
     return chunks;
 }
 
-static float[] GenerateMockEmbedding(string text)
+static async Task<float[]> GenerateEmbeddingAsync(string text, IConfiguration config, ILogger log)
 {
-    float[] vector = new float[1536];
-    int seed = text.GetHashCode();
+    var endpoint = config["AzureOpenAI:Endpoint"];
+    var apiKey = config["AzureOpenAI:ApiKey"];
+    var model = config["AzureOpenAI:EmbeddingDeploymentName"] ?? "text-embedding-3-small";
+
+    if (!string.IsNullOrEmpty(endpoint) && !string.IsNullOrEmpty(apiKey))
+    {
+        try
+        {
+            var openAiClient = new OpenAIClient(
+                new System.ClientModel.ApiKeyCredential(apiKey),
+                new OpenAIClientOptions { Endpoint = new Uri(endpoint) });
+            var embeddingClient = openAiClient.GetEmbeddingClient(model);
+            var result = await embeddingClient.GenerateEmbeddingAsync(text);
+            return result.Value.ToFloats().ToArray();
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Real embedding failed (model={Model}). Using stable deterministic fallback.", model);
+        }
+    }
+    else
+    {
+        log.LogDebug("AzureOpenAI not configured — using stable deterministic embedding fallback.");
+    }
+
+    return GenerateStableMockEmbedding(text);
+}
+
+// SHA-256-seeded deterministic fallback: consistent across all processes (unlike GetHashCode)
+static float[] GenerateStableMockEmbedding(string text)
+{
+    var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
+    int seed = BitConverter.ToInt32(hashBytes, 0);
     var rand = new Random(seed);
+    float[] vector = new float[1536];
     double sumOfSquares = 0;
     for (int i = 0; i < 1536; i++)
     {
@@ -409,12 +444,8 @@ static float[] GenerateMockEmbedding(string text)
     }
     double length = Math.Sqrt(sumOfSquares);
     if (length > 0)
-    {
         for (int i = 0; i < 1536; i++)
-        {
             vector[i] = (float)(vector[i] / length);
-        }
-    }
     return vector;
 }
 

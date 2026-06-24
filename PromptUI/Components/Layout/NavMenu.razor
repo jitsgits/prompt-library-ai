@@ -1,4 +1,5 @@
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
@@ -70,6 +71,7 @@
                                 @foreach (var prompt in catPrompts)
                                 {
                                     <li class="tree-leaf @(StateService.SelectedPrompt?.Id == prompt.Id ? "active" : "")" 
+                                        id="nav-prompt-@prompt.Id"
                                         @onclick="() => SelectPrompt(prompt)"
                                         @onclick:stopPropagation="true">
                                         <i class="leaf-icon bi bi-file-earmark-text" style="font-size: 0.85rem;"></i>
@@ -92,9 +94,31 @@
 @code {
     [Inject] public ExplorerStateService StateService { get; set; } = default!;
 
+    private string? _lastSelectedPromptId;
+
     protected override void OnInitialized()
     {
         StateService.OnStateChanged += StateHasChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (StateService.SelectedPrompt != null && StateService.SelectedPrompt.Id != _lastSelectedPromptId)
+        {
+            _lastSelectedPromptId = StateService.SelectedPrompt.Id;
+            try
+            {
+                await JS.InvokeVoidAsync("scrollElementIntoView", $"nav-prompt-{StateService.SelectedPrompt.Id}");
+            }
+            catch
+            {
+                // Ignore JS errors on prerendering
+            }
+        }
+        else if (StateService.SelectedPrompt == null)
+        {
+            _lastSelectedPromptId = null;
+        }
     }
 
     private void SelectPrompt(Prompt prompt)

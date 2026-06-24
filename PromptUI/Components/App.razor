@@ -36,6 +36,12 @@
                 element.scrollTop = element.scrollHeight;
             }
         };
+        window.scrollElementIntoView = function (elementId) {
+            var element = document.getElementById(elementId);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        };
     </script>
 </body>
 
